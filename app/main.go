@@ -8,6 +8,16 @@ func main() {
 	// Gin router with default middleware (logger and recovery).
 	r := gin.Default()
 
+	// Count every request for Prometheus (method + route template or raw path).
+	r.Use(func(c *gin.Context) {
+		path := c.FullPath()
+		if path == "" {
+			path = c.Request.URL.Path
+		}
+		RecordRequest(c.Request.Method, path)
+		c.Next()
+	})
+
 	// Liveness and readiness probes for load balancers / orchestrators.
 	r.GET("/health", HealthHandler)
 	r.GET("/ready", ReadyHandler)
