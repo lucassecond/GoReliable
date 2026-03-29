@@ -90,6 +90,13 @@ func SetTaskCount(n int) {
 	tasksTotalGauge.Set(float64(n))
 }
 
+// recordPrometheusHTTPMetrics increments HTTP counters and histograms (single recording path).
+func recordPrometheusHTTPMetrics(method, path string, statusCode int, elapsed time.Duration) {
+	statusLabel := strconv.Itoa(statusCode)
+	httpRequestsTotal.WithLabelValues(method, path, statusLabel).Inc()
+	httpRequestDurationSeconds.WithLabelValues(method, path).Observe(elapsed.Seconds())
+}
+
 // PrometheusHTTPMiddleware records request counts and latencies for Prometheus scraping.
 func PrometheusHTTPMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -102,13 +109,13 @@ func PrometheusHTTPMiddleware() gin.HandlerFunc {
 
 		c.Next()
 
-		status := pw.statusCode
-		method := c.Request.Method
-		path := c.Request.URL.Path
-		statusLabel := strconv.Itoa(status)
-
-		httpRequestsTotal.WithLabelValues(method, path, statusLabel).Inc()
-		httpRequestDurationSeconds.WithLabelValues(method, path).Observe(time.Since(start).Seconds())
+		// Gin's serveError sets status on writermem before the chain runs, so prefer the real status
+		// from the Gin response writer (covers 404/405 and any path that never calls WriteHeader).
+		status := pw.ResponseWriter.Status()
+		if status == 0 {
+			status = pw.statusCode
+		}
+		recordPrometheusHTTPMetrics(c.Request.Method, c.Request.URL.Path, status, time.Since(start))
 	}
 }
 
