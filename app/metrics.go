@@ -1,6 +1,10 @@
 package main
 
 import (
+	"net/http"
+	"strconv"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -13,23 +17,99 @@ var tasksTotalGauge = promauto.NewGauge(prometheus.GaugeOpts{
 	Help: "Current number of tasks stored in memory.",
 })
 
-// goreliable_http_requests_total counts each HTTP request, broken down by method and path.
-var httpRequestsTotalCounter = promauto.NewCounterVec(
+// http_requests_total counts HTTP requests by method, path, and terminal status code.
+var httpRequestsTotal = promauto.NewCounterVec(
 	prometheus.CounterOpts{
-		Name: "goreliable_http_requests_total",
-		Help: "Total HTTP requests received, labeled by method and path.",
+		Name: "http_requests_total",
+		Help: "Total number of HTTP requests processed.",
+	},
+	[]string{"method", "path", "status"},
+)
+
+// http_request_duration_seconds measures request latency by method and path.
+var httpRequestDurationSeconds = promauto.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "HTTP request duration in seconds.",
+		Buckets: prometheus.DefBuckets,
 	},
 	[]string{"method", "path"},
 )
+
+// prometheusResponseWriter captures the status code written by handlers and middleware.
+type prometheusResponseWriter struct {
+	gin.ResponseWriter
+	statusCode    int
+	headerWritten bool
+}
+
+func (w *prometheusResponseWriter) WriteHeader(statusCode int) {
+	if w.headerWritten {
+		return
+	}
+	w.headerWritten = true
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *prometheusResponseWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(b)
+	// Gin applies the status on first body write (WriteHeaderNow); keep our copy in sync.
+	w.statusCode = w.ResponseWriter.Status()
+	if !w.headerWritten {
+		w.headerWritten = true
+	}
+	return n, err
+}
+
+func (w *prometheusResponseWriter) WriteString(s string) (int, error) {
+	n, err := w.ResponseWriter.WriteString(s)
+	w.statusCode = w.ResponseWriter.Status()
+	if !w.headerWritten {
+		w.headerWritten = true
+	}
+	return n, err
+}
+
+func (w *prometheusResponseWriter) WriteHeaderNow() {
+	w.ResponseWriter.WriteHeaderNow()
+	w.statusCode = w.ResponseWriter.Status()
+	w.headerWritten = true
+}
+
+func (w *prometheusResponseWriter) Flush() {
+	w.ResponseWriter.Flush()
+	w.statusCode = w.ResponseWriter.Status()
+	if w.ResponseWriter.Written() {
+		w.headerWritten = true
+	}
+}
 
 // SetTaskCount sets the task gauge to n so scrapers see the live backlog size.
 func SetTaskCount(n int) {
 	tasksTotalGauge.Set(float64(n))
 }
 
-// RecordRequest increments the labeled HTTP request counter for one observed request.
-func RecordRequest(method, path string) {
-	httpRequestsTotalCounter.WithLabelValues(method, path).Inc()
+// PrometheusHTTPMiddleware records request counts and latencies for Prometheus scraping.
+func PrometheusHTTPMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		pw := &prometheusResponseWriter{
+			ResponseWriter: c.Writer,
+			statusCode:     http.StatusOK,
+		}
+		c.Writer = pw
+
+		c.Next()
+
+		status := pw.statusCode
+		method := c.Request.Method
+		path := c.Request.URL.Path
+		statusLabel := strconv.Itoa(status)
+
+		httpRequestsTotal.WithLabelValues(method, path, statusLabel).Inc()
+		httpRequestDurationSeconds.WithLabelValues(method, path).Observe(time.Since(start).Seconds())
+	}
 }
 
 // MetricsHandler exposes Prometheus metrics in text exposition format for scrapers.
