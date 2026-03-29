@@ -44,6 +44,7 @@ compactor:
   compaction_interval: 10m
   retention_enabled: true
   retention_delete_delay: 2h
+  delete_request_store: filesystem
 
 # Global limits; retention_period drops log streams older than seven days.
 limits_config:

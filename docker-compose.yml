@@ -1,0 +1,79 @@
+# GoReliable stack: Gin API, Prometheus metrics, Loki + Promtail logs, Grafana UI on one Docker network.
+services:
+  # REST API built from this repo; scraped by Prometheus and tagged for Promtail log routing.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: goreliable-api
+    ports:
+      - "8080:8080"
+    environment:
+      GIN_MODE: release
+    networks:
+      - goreliable-net
+    labels:
+      logging: promtail
+
+  # Time-series database that scrapes the API /metrics endpoint using the bundled config.
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: goreliable-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - goreliable-net
+    depends_on:
+      - api
+
+  # Log aggregation backend storing chunks and indexes on local filesystem paths from loki-config.yml.
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: goreliable-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+    networks:
+      - goreliable-net
+
+  # Log shipper that tails Docker container logs and pushes them to Loki.
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: goreliable-promtail
+    command: -config.file=/etc/promtail/config.yml
+    environment:
+      DOCKER_API_VERSION: "1.44"
+    volumes:
+    - ./monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
+    - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+    - goreliable-net
+    depends_on:
+    - loki
+
+  # Visualization layer with admin credentials for local demos; reads Prometheus and Loki data sources.
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: goreliable-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - goreliable-net
+    depends_on:
+      - prometheus
+      - loki
+
+networks:
+  goreliable-net:
+    driver: bridge
