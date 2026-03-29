@@ -1,0 +1,15 @@
+# Defaults for scrape timing and rule evaluation when jobs do not override them.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# List of scrape jobs; each defines what to pull and how often (inherits global if omitted).
+scrape_configs:
+  # GoReliable Gin API (e.g. service name `api` on Docker Compose network).
+  - job_name: goreliable-api
+    static_configs:
+      # Target host:port; Prometheus uses /metrics by default. Tag all series from this job.
+      - targets:
+          - api:8080
+        labels:
+          env: local

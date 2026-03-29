@@ -1,0 +1,54 @@
+# Disable multi-tenant auth so local collectors can ship logs without credentials.
+auth_enabled: false
+
+# Expose Loki's HTTP API (and gRPC for internal components) on fixed ports.
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+# Single-binary defaults: in-memory ring and filesystem roots for chunks and ruler data.
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# TSDB index tables and filesystem-backed object store for local development.
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# Where TSDB shipper writes active index files and where chunks live on disk.
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/index
+    cache_location: /loki/index_cache
+  filesystem:
+    directory: /loki/chunks
+
+# Background compaction and retention enforcement for data under limits_config.
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+
+# Global limits; retention_period drops log streams older than seven days.
+limits_config:
+  retention_period: 168h
+
+# Opt out of Grafana Labs usage reporting in local stacks.
+analytics:
+  reporting_enabled: false

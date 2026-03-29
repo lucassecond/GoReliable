@@ -1,0 +1,39 @@
+# HTTP-only agent UI (metrics/ready); gRPC listener disabled for a simple local setup.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+# On-disk cursor so Promtail resumes tailing after restarts instead of duplicating lines.
+positions:
+  filename: /tmp/positions.yaml
+
+# Single Loki push client for the docker-compose service hostname.
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Discover running containers via Docker Engine and tail their json-file logs.
+  - job_name: docker-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+
+    relabel_configs:
+      # Point each target at the container's json-file log (/var/lib/docker/containers/<id>/<id>-json.log).
+      - source_labels: [__meta_docker_container_id]
+        regex: (.+)
+        target_label: __path__
+        replacement: /var/lib/docker/containers/$1/$1-json.log
+
+      # Attach a fixed job label to every log stream from this scrape.
+      - target_label: job
+        replacement: docker
+
+      # Copy Docker's container name metadata into a searchable Loki label (leading slash stripped).
+      - source_labels: [__meta_docker_container_name]
+        regex: /?(.*)
+        target_label: container_name
+
+    pipeline_stages:
+      # Strip the docker json-file envelope (log/stream/time) so Loki stores the real message body.
+      - docker: {}
