@@ -74,6 +74,21 @@ services:
       - prometheus
       - loki
 
+  # Container-level CPU, memory, and network metrics for Grafana USE / infrastructure panels.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: goreliable-cadvisor
+    privileged: true
+    ports:
+      - "8090:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - goreliable-net
+
 networks:
   goreliable-net:
     driver: bridge

@@ -13,3 +13,10 @@ scrape_configs:
           - api:8080
         labels:
           env: local
+
+  # cAdvisor exposes container_cpu_usage_seconds_total, container_memory_rss, etc.
+  - job_name: cadvisor
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - goreliable-cadvisor:8080
